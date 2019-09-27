@@ -5,6 +5,8 @@
 #ifndef V8_DEBUG_DEBUG_INTERFACE_H_
 #define V8_DEBUG_DEBUG_INTERFACE_H_
 
+#include <memory>
+
 #include "include/v8-inspector.h"
 #include "include/v8-util.h"
 #include "include/v8.h"
@@ -157,6 +159,8 @@ class WasmScript : public Script {
 
   int NumFunctions() const;
   int NumImportedFunctions() const;
+  bool HasDwarf() const;
+  MemorySpan<const uint8_t> Bytecode() const;
 
   std::pair<int, int> GetFunctionRange(int function_index) const;
 

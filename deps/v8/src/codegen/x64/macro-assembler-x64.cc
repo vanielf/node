@@ -218,45 +218,45 @@ void TurboAssembler::CompareRoot(Operand with, RootIndex index) {
 
 void TurboAssembler::LoadTaggedPointerField(Register destination,
                                             Operand field_operand) {
-#ifdef V8_COMPRESS_POINTERS
-  DecompressTaggedPointer(destination, field_operand);
-#else
-  mov_tagged(destination, field_operand);
-#endif
+  if (COMPRESS_POINTERS_BOOL) {
+    DecompressTaggedPointer(destination, field_operand);
+  } else {
+    mov_tagged(destination, field_operand);
+  }
 }
 
 void TurboAssembler::LoadAnyTaggedField(Register destination,
                                         Operand field_operand,
                                         Register scratch) {
-#ifdef V8_COMPRESS_POINTERS
-  DecompressAnyTagged(destination, field_operand, scratch);
-#else
-  mov_tagged(destination, field_operand);
-#endif
+  if (COMPRESS_POINTERS_BOOL) {
+    DecompressAnyTagged(destination, field_operand, scratch);
+  } else {
+    mov_tagged(destination, field_operand);
+  }
 }
 
 void TurboAssembler::PushTaggedPointerField(Operand field_operand,
                                             Register scratch) {
-#ifdef V8_COMPRESS_POINTERS
-  DCHECK(!field_operand.AddressUsesRegister(scratch));
-  DecompressTaggedPointer(scratch, field_operand);
-  Push(scratch);
-#else
-  Push(field_operand);
-#endif
+  if (COMPRESS_POINTERS_BOOL) {
+    DCHECK(!field_operand.AddressUsesRegister(scratch));
+    DecompressTaggedPointer(scratch, field_operand);
+    Push(scratch);
+  } else {
+    Push(field_operand);
+  }
 }
 
 void TurboAssembler::PushTaggedAnyField(Operand field_operand,
                                         Register scratch1, Register scratch2) {
-#ifdef V8_COMPRESS_POINTERS
-  DCHECK(!AreAliased(scratch1, scratch2));
-  DCHECK(!field_operand.AddressUsesRegister(scratch1));
-  DCHECK(!field_operand.AddressUsesRegister(scratch2));
-  DecompressAnyTagged(scratch1, field_operand, scratch2);
-  Push(scratch1);
-#else
-  Push(field_operand);
-#endif
+  if (COMPRESS_POINTERS_BOOL) {
+    DCHECK(!AreAliased(scratch1, scratch2));
+    DCHECK(!field_operand.AddressUsesRegister(scratch1));
+    DCHECK(!field_operand.AddressUsesRegister(scratch2));
+    DecompressAnyTagged(scratch1, field_operand, scratch2);
+    Push(scratch1);
+  } else {
+    Push(field_operand);
+  }
 }
 
 void TurboAssembler::SmiUntagField(Register dst, Operand src) {
@@ -265,24 +265,20 @@ void TurboAssembler::SmiUntagField(Register dst, Operand src) {
 
 void TurboAssembler::StoreTaggedField(Operand dst_field_operand,
                                       Immediate value) {
-#ifdef V8_COMPRESS_POINTERS
-  RecordComment("[ StoreTagged");
-  movl(dst_field_operand, value);
-  RecordComment("]");
-#else
-  movq(dst_field_operand, value);
-#endif
+  if (COMPRESS_POINTERS_BOOL) {
+    movl(dst_field_operand, value);
+  } else {
+    movq(dst_field_operand, value);
+  }
 }
 
 void TurboAssembler::StoreTaggedField(Operand dst_field_operand,
                                       Register value) {
-#ifdef V8_COMPRESS_POINTERS
-  RecordComment("[ StoreTagged");
-  movl(dst_field_operand, value);
-  RecordComment("]");
-#else
-  movq(dst_field_operand, value);
-#endif
+  if (COMPRESS_POINTERS_BOOL) {
+    movl(dst_field_operand, value);
+  } else {
+    movq(dst_field_operand, value);
+  }
 }
 
 void TurboAssembler::DecompressTaggedSigned(Register destination,
@@ -505,8 +501,9 @@ void MacroAssembler::RecordWrite(Register object, Register address,
   DCHECK(value != address);
   AssertNotSmi(object);
 
-  if (remembered_set_action == OMIT_REMEMBERED_SET &&
-      !FLAG_incremental_marking) {
+  if ((remembered_set_action == OMIT_REMEMBERED_SET &&
+       !FLAG_incremental_marking) ||
+      FLAG_disable_write_barriers) {
     return;
   }
 
@@ -1108,7 +1105,11 @@ Register TurboAssembler::GetSmiConstant(Smi source) {
     xorl(kScratchRegister, kScratchRegister);
     return kScratchRegister;
   }
-  Move(kScratchRegister, source);
+  if (SmiValuesAre32Bits()) {
+    Move(kScratchRegister, source);
+  } else {
+    movl(kScratchRegister, Immediate(source));
+  }
   return kScratchRegister;
 }
 
@@ -1134,20 +1135,32 @@ void TurboAssembler::Move(Register dst, ExternalReference ext) {
 
 void MacroAssembler::SmiTag(Register dst, Register src) {
   STATIC_ASSERT(kSmiTag == 0);
-  if (dst != src) {
-    movq(dst, src);
-  }
   DCHECK(SmiValuesAre32Bits() || SmiValuesAre31Bits());
-  shlq(dst, Immediate(kSmiShift));
+  if (COMPRESS_POINTERS_BOOL) {
+    if (dst != src) {
+      movl(dst, src);
+    }
+    shll(dst, Immediate(kSmiShift));
+  } else {
+    if (dst != src) {
+      movq(dst, src);
+    }
+    shlq(dst, Immediate(kSmiShift));
+  }
 }
 
 void TurboAssembler::SmiUntag(Register dst, Register src) {
   STATIC_ASSERT(kSmiTag == 0);
-  if (dst != src) {
-    movq(dst, src);
-  }
   DCHECK(SmiValuesAre32Bits() || SmiValuesAre31Bits());
-  sarq(dst, Immediate(kSmiShift));
+  if (COMPRESS_POINTERS_BOOL) {
+    movsxlq(dst, src);
+    sarq(dst, Immediate(kSmiShift));
+  } else {
+    if (dst != src) {
+      movq(dst, src);
+    }
+    sarq(dst, Immediate(kSmiShift));
+  }
 }
 
 void TurboAssembler::SmiUntag(Register dst, Operand src) {
@@ -1157,12 +1170,13 @@ void TurboAssembler::SmiUntag(Register dst, Operand src) {
     movsxlq(dst, dst);
   } else {
     DCHECK(SmiValuesAre31Bits());
-#ifdef V8_COMPRESS_POINTERS
-    movsxlq(dst, src);
-#else
-    movq(dst, src);
-#endif
-    sarq(dst, Immediate(kSmiShift));
+    if (COMPRESS_POINTERS_BOOL) {
+      movsxlq(dst, src);
+      sarq(dst, Immediate(kSmiShift));
+    } else {
+      movq(dst, src);
+      sarq(dst, Immediate(kSmiShift));
+    }
   }
 }
 
@@ -1282,12 +1296,9 @@ SmiIndex MacroAssembler::SmiToIndex(Register dst, Register src, int shift) {
     return SmiIndex(dst, times_1);
   } else {
     DCHECK(SmiValuesAre31Bits());
-    if (dst != src) {
-      mov_tagged(dst, src);
-    }
     // We have to sign extend the index register to 64-bit as the SMI might
     // be negative.
-    movsxlq(dst, dst);
+    movsxlq(dst, src);
     if (shift < kSmiShift) {
       sarq(dst, Immediate(kSmiShift - shift));
     } else if (shift != kSmiShift) {
@@ -1422,7 +1433,6 @@ void MacroAssembler::Negpd(XMMRegister dst) {
 }
 
 void MacroAssembler::Cmp(Register dst, Handle<Object> source) {
-  AllowDeferredHandleDereference smi_check;
   if (source->IsSmi()) {
     Cmp(dst, Smi::cast(*source));
   } else {
@@ -1432,7 +1442,6 @@ void MacroAssembler::Cmp(Register dst, Handle<Object> source) {
 }
 
 void MacroAssembler::Cmp(Operand dst, Handle<Object> source) {
-  AllowDeferredHandleDereference smi_check;
   if (source->IsSmi()) {
     Cmp(dst, Smi::cast(*source));
   } else {
@@ -1462,6 +1471,8 @@ void TurboAssembler::Move(Register result, Handle<HeapObject> object,
                           RelocInfo::Mode rmode) {
   if (FLAG_embedded_builtins) {
     if (root_array_available_ && options().isolate_independent_code) {
+      // TODO(v8:9706): Fix-it! This load will always uncompress the value
+      // even when we are loading a compressed embedded object.
       IndirectLoadConstant(result, object);
       return;
     }
@@ -1523,9 +1534,10 @@ void MacroAssembler::Pop(Operand dst) { popq(dst); }
 
 void MacroAssembler::PopQuad(Operand dst) { popq(dst); }
 
-void TurboAssembler::Jump(ExternalReference ext) {
-  LoadAddress(kScratchRegister, ext);
-  jmp(kScratchRegister);
+void TurboAssembler::Jump(const ExternalReference& reference) {
+  DCHECK(root_array_available());
+  jmp(Operand(kRootRegister, RootRegisterOffsetForExternalReferenceTableEntry(
+                                 isolate(), reference)));
 }
 
 void TurboAssembler::Jump(Operand op) { jmp(op); }
@@ -1594,12 +1606,7 @@ void TurboAssembler::Call(Handle<Code> code_object, RelocInfo::Mode rmode) {
     if (isolate()->builtins()->IsBuiltinHandle(code_object, &builtin_index) &&
         Builtins::IsIsolateIndependent(builtin_index)) {
       // Inline the trampoline.
-      RecordCommentForOffHeapTrampoline(builtin_index);
-      CHECK_NE(builtin_index, Builtins::kNoBuiltinId);
-      EmbeddedData d = EmbeddedData::FromBlob();
-      Address entry = d.InstructionStartOfBuiltin(builtin_index);
-      Move(kScratchRegister, entry, RelocInfo::OFF_HEAP_TARGET);
-      call(kScratchRegister);
+      CallBuiltin(builtin_index);
       return;
     }
   }
@@ -1608,30 +1615,35 @@ void TurboAssembler::Call(Handle<Code> code_object, RelocInfo::Mode rmode) {
 }
 
 Operand TurboAssembler::EntryFromBuiltinIndexAsOperand(Register builtin_index) {
-#if defined(V8_COMPRESS_POINTERS) || defined(V8_31BIT_SMIS_ON_64BIT_ARCH)
-  STATIC_ASSERT(kSmiShiftSize == 0);
-  STATIC_ASSERT(kSmiTagSize == 1);
-  STATIC_ASSERT(kSmiTag == 0);
+  if (SmiValuesAre32Bits()) {
+    // The builtin_index register contains the builtin index as a Smi.
+    SmiUntag(builtin_index, builtin_index);
+    return Operand(kRootRegister, builtin_index, times_system_pointer_size,
+                   IsolateData::builtin_entry_table_offset());
+  } else {
+    DCHECK(SmiValuesAre31Bits());
 
-  // The builtin_index register contains the builtin index as a Smi.
-  // Untagging is folded into the indexing operand below (we use times_4 instead
-  // of times_8 since smis are already shifted by one).
-  return Operand(kRootRegister, builtin_index, times_4,
-                 IsolateData::builtin_entry_table_offset());
-#else   // defined(V8_COMPRESS_POINTERS) || defined(V8_31BIT_SMIS_ON_64BIT_ARCH)
-  STATIC_ASSERT(kSmiShiftSize == 31);
-  STATIC_ASSERT(kSmiTagSize == 1);
-  STATIC_ASSERT(kSmiTag == 0);
-
-  // The builtin_index register contains the builtin index as a Smi.
-  SmiUntag(builtin_index, builtin_index);
-  return Operand(kRootRegister, builtin_index, times_8,
-                 IsolateData::builtin_entry_table_offset());
-#endif  // defined(V8_COMPRESS_POINTERS) || defined(V8_31BIT_SMIS_ON_64BIT_ARCH)
+    // The builtin_index register contains the builtin index as a Smi.
+    // Untagging is folded into the indexing operand below (we use
+    // times_half_system_pointer_size since smis are already shifted by one).
+    return Operand(kRootRegister, builtin_index, times_half_system_pointer_size,
+                   IsolateData::builtin_entry_table_offset());
+  }
 }
 
 void TurboAssembler::CallBuiltinByIndex(Register builtin_index) {
   Call(EntryFromBuiltinIndexAsOperand(builtin_index));
+}
+
+void TurboAssembler::CallBuiltin(int builtin_index) {
+  DCHECK(Builtins::IsBuiltinId(builtin_index));
+  DCHECK(FLAG_embedded_builtins);
+  RecordCommentForOffHeapTrampoline(builtin_index);
+  CHECK_NE(builtin_index, Builtins::kNoBuiltinId);
+  EmbeddedData d = EmbeddedData::FromBlob();
+  Address entry = d.InstructionStartOfBuiltin(builtin_index);
+  Move(kScratchRegister, entry, RelocInfo::OFF_HEAP_TARGET);
+  call(kScratchRegister);
 }
 
 void TurboAssembler::LoadCodeObjectEntry(Register destination,
@@ -2435,7 +2447,7 @@ void TurboAssembler::LeaveFrame(StackFrame::Type type) {
   popq(rbp);
 }
 
-#ifdef V8_OS_WIN
+#ifdef V8_TARGET_OS_WIN
 void TurboAssembler::AllocateStackSpace(Register bytes_scratch) {
   // In windows, we cannot increment the stack size by more than one page
   // (minimum page size is 4KB) without accessing at least one byte on the
@@ -2503,7 +2515,7 @@ void MacroAssembler::EnterExitFramePrologue(bool save_rax,
 
 void MacroAssembler::EnterExitFrameEpilogue(int arg_stack_space,
                                             bool save_doubles) {
-#ifdef _WIN64
+#ifdef V8_TARGET_OS_WIN
   const int kShadowSpace = 4;
   arg_stack_space += kShadowSpace;
 #endif
@@ -2607,7 +2619,7 @@ void MacroAssembler::LeaveExitFrameEpilogue() {
   movq(c_entry_fp_operand, Immediate(0));
 }
 
-#ifdef _WIN64
+#ifdef V8_TARGET_OS_WIN
 static const int kRegisterPassedArguments = 4;
 #else
 static const int kRegisterPassedArguments = 6;
@@ -2626,7 +2638,7 @@ int TurboAssembler::ArgumentStackSlotsForCFunctionCall(int num_arguments) {
   // On AMD64 ABI (Linux/Mac) the first six arguments are passed in registers
   // and the caller does not reserve stack slots for them.
   DCHECK_GE(num_arguments, 0);
-#ifdef _WIN64
+#ifdef V8_TARGET_OS_WIN
   const int kMinimumStackSlots = kRegisterPassedArguments;
   if (num_arguments < kMinimumStackSlots) return kMinimumStackSlots;
   return num_arguments;
